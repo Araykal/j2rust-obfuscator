@@ -14,4 +14,4 @@ pub use arrays::{new_primitive_array, new_multi_array, array_load, array_store};
 pub use methods::{call_method, allocate_object};
 pub use fields::{get_field, set_field};
 pub use refs::LocalRefs;
-pub use strings::concat_literal;
+pub use strings::{concat_literal, substring};

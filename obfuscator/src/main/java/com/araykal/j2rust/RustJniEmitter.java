@@ -54,6 +54,20 @@ final class RustJniEmitter {
             code.append("stack.push(Value::I(unit as i32));");
             return;
         }
+        if (node.getOpcode() == Opcodes.INVOKEVIRTUAL && node.owner.equals("java/lang/String") &&
+                node.name.equals("substring") && (node.desc.equals("(I)Ljava/lang/String;") ||
+                node.desc.equals("(II)Ljava/lang/String;"))) {
+            if (node.desc.equals("(I)Ljava/lang/String;")) {
+                code.append("let begin = stack.pop().unwrap().i(); let text = stack.pop().unwrap().o(); ");
+                code.append("let end = if text.is_null() { 0 } else { unsafe { (**_env).GetStringLength.unwrap()(_env, text) } }; ");
+            } else {
+                code.append("let end = stack.pop().unwrap().i(); let begin = stack.pop().unwrap().i(); let text = stack.pop().unwrap().o(); ");
+            }
+            code.append("let result = unsafe { substring(_env, text, begin, end) }; ");
+            code.append("if unsafe { has_exception(_env) } { ").append(exceptionPath).append(" } ");
+            code.append("stack.push(Value::O(refs.track(result))); ");
+            return;
+        }
         Type[] arguments = Type.getArgumentTypes(node.desc);
         Type returnType = Type.getReturnType(node.desc);
         code.append("let mut args = vec![jni_sys::jvalue { i: 0 }; ").append(arguments.length).append("]; ");
