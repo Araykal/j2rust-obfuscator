@@ -33,6 +33,14 @@ final class RustJniEmitter {
             code.append("stack.push(Value::I(unsafe { (**_env).GetStringLength.unwrap()(_env, text) }));");
             return;
         }
+        if (node.getOpcode() == Opcodes.INVOKEVIRTUAL && node.owner.equals("java/lang/String") &&
+                node.name.equals("isEmpty") && node.desc.equals("()Z")) {
+            code.append("let text = stack.pop().unwrap().o(); ");
+            code.append("if text.is_null() { unsafe { throw_named(_env, \"java/lang/NullPointerException\", \"isEmpty\"); } ")
+                    .append(exceptionPath).append(" } ");
+            code.append("stack.push(Value::I(if unsafe { (**_env).GetStringLength.unwrap()(_env, text) } == 0 { 1 } else { 0 }));");
+            return;
+        }
         Type[] arguments = Type.getArgumentTypes(node.desc);
         Type returnType = Type.getReturnType(node.desc);
         code.append("let mut args = vec![jni_sys::jvalue { i: 0 }; ").append(arguments.length).append("]; ");
