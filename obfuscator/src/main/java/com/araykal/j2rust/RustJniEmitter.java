@@ -3,6 +3,7 @@ package com.araykal.j2rust;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.*;
+import com.araykal.j2rust.intrinsics.IntrinsicRegistry;
 
 final class RustJniEmitter {
     private RustJniEmitter() {
@@ -25,49 +26,7 @@ final class RustJniEmitter {
     }
 
     static void emitCall(StringBuilder code, MethodInsnNode node, String exceptionPath) {
-        if (node.getOpcode() == Opcodes.INVOKEVIRTUAL && node.owner.equals("java/lang/String") &&
-                node.name.equals("length") && node.desc.equals("()I")) {
-            code.append("let text = stack.pop().unwrap().o(); ");
-            code.append("if text.is_null() { unsafe { throw_named(_env, \"java/lang/NullPointerException\", \"length\"); } ")
-                    .append(exceptionPath).append(" } ");
-            code.append("stack.push(Value::I(unsafe { (**_env).GetStringLength.unwrap()(_env, text) }));");
-            return;
-        }
-        if (node.getOpcode() == Opcodes.INVOKEVIRTUAL && node.owner.equals("java/lang/String") &&
-                node.name.equals("isEmpty") && node.desc.equals("()Z")) {
-            code.append("let text = stack.pop().unwrap().o(); ");
-            code.append("if text.is_null() { unsafe { throw_named(_env, \"java/lang/NullPointerException\", \"isEmpty\"); } ")
-                    .append(exceptionPath).append(" } ");
-            code.append("stack.push(Value::I(if unsafe { (**_env).GetStringLength.unwrap()(_env, text) } == 0 { 1 } else { 0 }));");
-            return;
-        }
-        if (node.getOpcode() == Opcodes.INVOKEVIRTUAL && node.owner.equals("java/lang/String") &&
-                node.name.equals("charAt") && node.desc.equals("(I)C")) {
-            code.append("let index = stack.pop().unwrap().i(); let text = stack.pop().unwrap().o(); ");
-            code.append("if text.is_null() { unsafe { throw_named(_env, \"java/lang/NullPointerException\", \"charAt\"); } ")
-                    .append(exceptionPath).append(" } ");
-            code.append("let length = unsafe { (**_env).GetStringLength.unwrap()(_env, text) }; ");
-            code.append("if index < 0 || index >= length { unsafe { throw_named(_env, \"java/lang/StringIndexOutOfBoundsException\", \"charAt\"); } ")
-                    .append(exceptionPath).append(" } ");
-            code.append("let mut unit: u16 = 0; unsafe { (**_env).GetStringRegion.unwrap()(_env, text as jni_sys::jstring, index, 1, &mut unit); } ");
-            code.append("if unsafe { has_exception(_env) } { ").append(exceptionPath).append(" } ");
-            code.append("stack.push(Value::I(unit as i32));");
-            return;
-        }
-        if (node.getOpcode() == Opcodes.INVOKEVIRTUAL && node.owner.equals("java/lang/String") &&
-                node.name.equals("substring") && (node.desc.equals("(I)Ljava/lang/String;") ||
-                node.desc.equals("(II)Ljava/lang/String;"))) {
-            if (node.desc.equals("(I)Ljava/lang/String;")) {
-                code.append("let begin = stack.pop().unwrap().i(); let text = stack.pop().unwrap().o(); ");
-                code.append("let end = if text.is_null() { 0 } else { unsafe { (**_env).GetStringLength.unwrap()(_env, text) } }; ");
-            } else {
-                code.append("let end = stack.pop().unwrap().i(); let begin = stack.pop().unwrap().i(); let text = stack.pop().unwrap().o(); ");
-            }
-            code.append("let result = unsafe { substring(_env, text, begin, end) }; ");
-            code.append("if unsafe { has_exception(_env) } { ").append(exceptionPath).append(" } ");
-            code.append("stack.push(Value::O(refs.track(result))); ");
-            return;
-        }
+        if (IntrinsicRegistry.emit(code, node, exceptionPath)) return;
         Type[] arguments = Type.getArgumentTypes(node.desc);
         Type returnType = Type.getReturnType(node.desc);
         code.append("let mut args = vec![jni_sys::jvalue { i: 0 }; ").append(arguments.length).append("]; ");
