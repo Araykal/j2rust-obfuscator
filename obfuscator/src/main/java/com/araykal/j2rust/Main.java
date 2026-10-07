@@ -9,14 +9,15 @@ import java.util.concurrent.Callable;
 
 public class Main {
 
-    private static final String VERSION = "1.0.7";
+    private static String VERSION = "git-00000000";
 
     public static void main(String[] args) throws IOException {
         System.exit(new CommandLine(new Runner())
                 .setCaseInsensitiveEnumValuesAllowed(true).execute(args));
     }
 
-    @CommandLine.Command(name = "j2rust", mixinStandardHelpOptions = true, version = VERSION,
+    @CommandLine.Command(name = "j2rust", mixinStandardHelpOptions = true,
+            versionProvider = VersionProvider.class,
             description = "Transpiles a JAR and generates an output JAR with a native project")
     private static class Runner implements Callable<Integer> {
 
@@ -36,6 +37,13 @@ public class Main {
         public Integer call() throws Exception {
             new RustBackend().process(jarFile.toPath(), Paths.get(outputDirectory), useAnnotations, strict);
             return 0;
+        }
+    }
+
+    private static class VersionProvider implements CommandLine.IVersionProvider {
+        @Override
+        public String[] getVersion() {
+            return new String[]{VERSION};
         }
     }
 }

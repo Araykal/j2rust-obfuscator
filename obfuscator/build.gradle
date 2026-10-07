@@ -8,6 +8,54 @@ plugins {
 sourceCompatibility = targetCompatibility = '1.8'
 [compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
 
+task stampVersion {
+    dependsOn compileJava
+    doLast {
+        def version = ''
+        try {
+            def process = new ProcessBuilder('git', '-c', 'safe.directory=*', 'rev-parse', '--short=8', 'HEAD')
+                    .directory(rootProject.projectDir)
+                    .redirectErrorStream(true)
+                    .start()
+            def commit = process.inputStream.text.trim()
+            if (process.waitFor() == 0 && commit ==~ /[0-9a-fA-F]{8}/) {
+                version = "git-${commit}"
+            }
+        } catch (Exception ignored) {
+        }
+        def classFile = file("$buildDir/classes/java/main/com/araykal/j2rust/Main.class")
+        byte[] bytes = classFile.bytes
+        byte[] marker = 'git-00000000'.getBytes('UTF-8')
+        byte[] replacement = version.getBytes('UTF-8')
+        if (replacement.length != marker.length) {
+            throw new GradleException("version error ")
+        }
+        int matches = 0
+        for (int index = 0; index <= bytes.length - marker.length; index++) {
+            boolean found = true
+            for (int offset = 0; offset < marker.length; offset++) {
+                if (bytes[index + offset] != marker[offset]) {
+                    found = false
+                    break
+                }
+            }
+            if (found) {
+                for (int offset = 0; offset < replacement.length; offset++) {
+                    bytes[index + offset] = replacement[offset]
+                }
+                matches++
+            }
+        }
+        if (matches == 0) {
+            throw new GradleException('not main .class')
+        }
+        classFile.bytes = bytes
+    }
+}
+
+jar.dependsOn stampVersion
+shadowJar.dependsOn stampVersion
+
 if (!hasProperty('mainClass')) {
     ext.mainClass = 'com.araykal.j2rust.Main'
 }
