@@ -41,6 +41,19 @@ final class RustJniEmitter {
             code.append("stack.push(Value::I(if unsafe { (**_env).GetStringLength.unwrap()(_env, text) } == 0 { 1 } else { 0 }));");
             return;
         }
+        if (node.getOpcode() == Opcodes.INVOKEVIRTUAL && node.owner.equals("java/lang/String") &&
+                node.name.equals("charAt") && node.desc.equals("(I)C")) {
+            code.append("let index = stack.pop().unwrap().i(); let text = stack.pop().unwrap().o(); ");
+            code.append("if text.is_null() { unsafe { throw_named(_env, \"java/lang/NullPointerException\", \"charAt\"); } ")
+                    .append(exceptionPath).append(" } ");
+            code.append("let length = unsafe { (**_env).GetStringLength.unwrap()(_env, text) }; ");
+            code.append("if index < 0 || index >= length { unsafe { throw_named(_env, \"java/lang/StringIndexOutOfBoundsException\", \"charAt\"); } ")
+                    .append(exceptionPath).append(" } ");
+            code.append("let mut unit: u16 = 0; unsafe { (**_env).GetStringRegion.unwrap()(_env, text as jni_sys::jstring, index, 1, &mut unit); } ");
+            code.append("if unsafe { has_exception(_env) } { ").append(exceptionPath).append(" } ");
+            code.append("stack.push(Value::I(unit as i32));");
+            return;
+        }
         Type[] arguments = Type.getArgumentTypes(node.desc);
         Type returnType = Type.getReturnType(node.desc);
         code.append("let mut args = vec![jni_sys::jvalue { i: 0 }; ").append(arguments.length).append("]; ");
