@@ -1,5 +1,6 @@
 package com.araykal.j2rust;
 
+import com.araykal.j2rust.utils.ConsoleUtil;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -15,6 +16,8 @@ import com.araykal.j2rust.lowering.RustStringConcatLowerer;
 import com.araykal.j2rust.lowering.RustInvokeDynamicLowerer;
 import com.araykal.j2rust.lowering.RustLegacySubroutineLowerer;
 import com.araykal.j2rust.report.CoverageReport;
+import com.araykal.j2rust.build.BuildArtifact;
+import com.araykal.j2rust.build.RustCompiler;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -41,10 +44,31 @@ public final class RustBackend {
     private static final SecureRandom GENERATED_RANDOM = new SecureRandom();
 
     public void process(Path input, Path output, boolean useAnnotations) throws Exception {
-        process(input, output, useAnnotations, false);
+        process(input, output, useAnnotations, false, java.util.Collections.emptyList(),
+                java.util.Collections.emptyList(), input.getFileName().toString(), false);
     }
 
     public void process(Path input, Path output, boolean useAnnotations, boolean strict) throws Exception {
+        process(input, output, useAnnotations, strict, java.util.Collections.emptyList(),
+                java.util.Collections.emptyList(), input.getFileName().toString(), false);
+    }
+
+    public void process(Path input, Path output, boolean useAnnotations, boolean strict,
+                        List<String> include, List<String> exclude, String outputJarName) throws Exception {
+        process(input, output, useAnnotations, strict, include, exclude, outputJarName, false);
+    }
+
+    public void process(Path input, Path output, boolean useAnnotations, boolean strict,
+                        List<String> include, List<String> exclude, String outputJarName,
+                        boolean clear) throws Exception {
+        process(input, output, useAnnotations, strict, include, exclude, outputJarName, clear,
+                "cargo", java.util.Collections.singletonList("host"));
+    }
+
+    public void process(Path input, Path output, boolean useAnnotations, boolean strict,
+                        List<String> include, List<String> exclude, String outputJarName,
+                        boolean clear, String buildTool, List<String> buildTargets) throws Exception {
+        ConsoleUtil.phase("Preparing Rust runtime and JNI bridge");
         Files.createDirectories(output);
         CoverageReport coverage = new CoverageReport();
         Set<String> occupied = new HashSet<>();
@@ -67,7 +91,7 @@ public final class RustBackend {
         Map<String, byte[]> entries = new LinkedHashMap<>();
         Map<String, List<MethodRegistration>> registrations = new LinkedHashMap<>();
         List<ClassNode> lambdaHelpers = new ArrayList<>();
-        ClassMethodFilter filter = new ClassMethodFilter(useAnnotations);
+        ClassMethodFilter filter = new ClassMethodFilter(useAnnotations, include, exclude);
         int converted = 0;
         int skipped = 0;
 
@@ -88,25 +112,32 @@ public final class RustBackend {
                 }
                 ClassNode clazz = new ClassNode(Opcodes.ASM9);
                 new ClassReader(bytes).accept(clazz, 0);
+                ConsoleUtil.detail("Reading class " + clazz.name + " (" + clazz.methods.size() + " methods)");
                 if (entry.getName().startsWith("META-INF/versions/")) {
+                    ConsoleUtil.detail("Retaining multi-release variant " + entry.getName());
                     for (MethodNode method : clazz.methods) {
                         if ((method.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) continue;
                         skipped++;
-                        coverage.add(clazz.name, method.name, method.desc, "java", "multi-release class variant");
+                        coverage.add(clazz.name, method.name, method.desc, "java-retained", "multi-release class variant");
                     }
                     entries.put(entry.getName(), bytes);
                     continue;
                 }
                 if (!filter.shouldProcess(clazz)) {
+                    ConsoleUtil.detail("Excluded by class filter: " + clazz.name);
                     for (MethodNode method : clazz.methods)
                         if (RustMethodSelector.shouldProcess(method) || method.name.equals("<init>") || method.name.equals("<clinit>"))
                             coverage.add(clazz.name, method.name, method.desc, "excluded", "class filter");
                     entries.put(entry.getName(), bytes);
                     continue;
                 }
+                ConsoleUtil.detail("Lowering legacy subroutines: " + clazz.name);
                 RustLegacySubroutineLowerer.lower(clazz);
+                ConsoleUtil.detail("Lowering string concatenation: " + clazz.name);
                 RustStringConcatLowerer.lower(clazz);
+                ConsoleUtil.detail("Lowering lambda factories: " + clazz.name);
                 lambdaHelpers.addAll(RustLambdaLowerer.lower(clazz, occupied));
+                ConsoleUtil.detail("Lowering invokedynamic and constants: " + clazz.name);
                 List<MethodNode> dynamicBridges = RustInvokeDynamicLowerer.lower(clazz);
                 Set<String> directMethods = new HashSet<>();
                 for (MethodNode candidate : clazz.methods) {
@@ -120,7 +151,7 @@ public final class RustBackend {
                 for (MethodNode method : clazz.methods) {
                     if (dynamicBridges.contains(method)) {
                         skipped++;
-                        coverage.add(clazz.name, method.name, method.desc, "java",
+                        coverage.add(clazz.name, method.name, method.desc, "java-retained",
                                 method.name.startsWith("j2rust$condy$") ?
                                         "JVM ConstantDynamic bootstrap bridge" :
                                         method.name.startsWith("j2rust$ldc$") ?
@@ -134,15 +165,14 @@ public final class RustBackend {
                     if (!filter.shouldProcess(clazz, method) || !RustOpcodeSupport.supported(method)) {
                         if (filter.shouldProcess(clazz, method) && RustMethodSelector.shouldProcess(method)) {
                             skipped++;
-                            coverage.add(clazz.name, method.name, method.desc, "java",
+                            coverage.add(clazz.name, method.name, method.desc, "java-retained",
                                     RustOpcodeSupport.unsupportedReason(method));
-                            System.out.println("Kept Java: " + clazz.name + "." + method.name + method.desc +
-                                    " — " + RustOpcodeSupport.unsupportedReason(method));
+                            ConsoleUtil.retained(clazz.name, method.name, RustOpcodeSupport.unsupportedReason(method));
                         } else if (RustMethodSelector.shouldProcess(method))
                             coverage.add(clazz.name, method.name, method.desc, "excluded", "method filter");
                         continue;
                     }
-                    coverage.add(clazz.name, method.name, method.desc, "rust", "");
+                    coverage.add(clazz.name, method.name, method.desc, RustExecutionMode.forMethod(method), "");
                     source.append(RustMethodEmitter.emit(clazz, method, directMethods));
                     registrations.computeIfAbsent(clazz.name, ignored -> new ArrayList<>())
                             .add(new MethodRegistration(clazz.name, method.name, method.desc,
@@ -153,6 +183,7 @@ public final class RustBackend {
                     if (method.localVariables != null) method.localVariables.clear();
                     changed = true;
                     converted++;
+                    ConsoleUtil.converted(clazz.name, method.name, RustExecutionMode.forMethod(method));
                 }
                 List<MethodNode> constructors = new ArrayList<>();
                 for (MethodNode method : clazz.methods) {
@@ -164,12 +195,11 @@ public final class RustBackend {
                             constructorHelperName, entries.size() * 100 + clazz.methods.indexOf(constructor));
                     if (bridge == null) {
                         skipped++;
-                        coverage.add(clazz.name, constructor.name, constructor.desc, "java", "constructor prefix or body");
-                        System.out.println("Kept Java: " + clazz.name + constructor.name +
-                                constructor.desc + " — constructor prefix or body");
+                        coverage.add(clazz.name, constructor.name, constructor.desc, "java-retained", "constructor prefix or body");
+                        ConsoleUtil.retained(clazz.name, constructor.name, "constructor prefix or body");
                         continue;
                     }
-                    coverage.add(clazz.name, constructor.name, constructor.desc, "rust", "constructor bridge");
+                    coverage.add(clazz.name, constructor.name, constructor.desc, "rust-jni", "constructor bridge");
                     source.append(RustMethodEmitter.emit(constructorHelper, bridge));
                     registrations.computeIfAbsent(constructorHelperName, ignored -> new ArrayList<>())
                             .add(new MethodRegistration(constructorHelperName, bridge.name, bridge.desc,
@@ -180,6 +210,7 @@ public final class RustBackend {
                     constructorHelper.methods.add(bridge);
                     changed = true;
                     converted++;
+                    ConsoleUtil.converted(clazz.name, constructor.name, "rust-jni");
                 }
                 if (initializer != null && filter.shouldProcess(clazz, initializer)) {
                     MethodNode bridge = new MethodNode(Opcodes.ASM9,
@@ -191,7 +222,7 @@ public final class RustBackend {
                     bridge.maxLocals = initializer.maxLocals;
                     bridge.maxStack = initializer.maxStack;
                     if (RustOpcodeSupport.supported(bridge)) {
-                        coverage.add(clazz.name, initializer.name, initializer.desc, "rust", "initializer bridge");
+                        coverage.add(clazz.name, initializer.name, initializer.desc, "rust-jni", "initializer bridge");
                         source.append(RustMethodEmitter.emit(clazz, bridge));
                         registrations.computeIfAbsent(clazz.name, ignored -> new ArrayList<>())
                                 .add(new MethodRegistration(clazz.name, bridge.name, bridge.desc,
@@ -211,10 +242,9 @@ public final class RustBackend {
                         converted++;
                     } else {
                         skipped++;
-                        coverage.add(clazz.name, initializer.name, initializer.desc, "java",
+                        coverage.add(clazz.name, initializer.name, initializer.desc, "java-retained",
                                 RustOpcodeSupport.unsupportedReason(bridge));
-                        System.out.println("Kept Java: " + clazz.name + ".<clinit>()V — " +
-                                RustOpcodeSupport.unsupportedReason(bridge));
+                        ConsoleUtil.retained(clazz.name, "<clinit>", RustOpcodeSupport.unsupportedReason(bridge));
                     }
                 }
                 if (changed) {
@@ -239,6 +269,7 @@ public final class RustBackend {
                 entries.put(entry.getName(), bytes);
             }
         }
+        ConsoleUtil.phase("Writing coverage.json");
         coverage.write(output.resolve("coverage.json"));
         if (strict && skipped != 0)
             throw new IOException("Strict mode: " + skipped + " selected methods remain Java; see " + output.resolve("coverage.json"));
@@ -286,6 +317,7 @@ public final class RustBackend {
         }
 
         source.append(RustRegistrationEmitter.emit(registrations, loaderName));
+        ConsoleUtil.phase("Generating Rust project");
         Files.write(rustDir.resolve("Cargo.toml"), (
                 "[package]\nname = \"" + LIBRARY + "\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n" +
                 "[lib]\ncrate-type = [\"cdylib\"]\n\n[dependencies]\njni-sys = \"0.3.1\"\n").getBytes(StandardCharsets.UTF_8));
@@ -298,36 +330,18 @@ public final class RustBackend {
                 Files.copy(runtime, runtimeDir.resolve(module + ".rs"), StandardCopyOption.REPLACE_EXISTING);
             }
         }
-        ProcessBuilder build = new ProcessBuilder("cargo", "build", "--release", "--offline");
-        build.directory(rustDir.toFile());
-        build.redirectErrorStream(true);
-        Process process = build.start();
-        ByteArrayOutputStream log = new ByteArrayOutputStream();
-        try (InputStream stream = process.getInputStream()) {
-            byte[] chunk = new byte[8192];
-            int count;
-            while ((count = stream.read(chunk)) != -1) log.write(chunk, 0, count);
+        List<BuildArtifact> artifacts = new RustCompiler().compile(rustDir, buildTool, buildTargets);
+        for (BuildArtifact artifact : artifacts) {
+            Files.copy(artifact.path(), output.resolve(artifact.filename()), StandardCopyOption.REPLACE_EXISTING);
+            entries.put(generatedPackage + "/" + artifact.filename(), Files.readAllBytes(artifact.path()));
         }
-        if (process.waitFor() != 0) throw new IOException("Rust build failed:\n" + log.toString("UTF-8"));
-
-        String os = System.getProperty("os.name").toLowerCase();
-        String arch = System.getProperty("os.arch").toLowerCase();
-        String platform = arch.equals("amd64") || arch.equals("x86_64") ? "x64" :
-                arch.equals("aarch64") ? "arm64" : arch.equals("x86") ? "x86" : arch;
-        String extension = os.contains("win") ? "windows.dll" :
-                os.contains("mac") ? "macos.dylib" : "linux.so";
-        String filename = os.contains("win") ? LIBRARY + ".dll" :
-                os.contains("mac") ? "lib" + LIBRARY + ".dylib" : "lib" + LIBRARY + ".so";
-        Path compiled = rustDir.resolve("target").resolve("release").resolve(filename);
-        if (!Files.isRegularFile(compiled)) throw new IOException("Missing compiled library: " + compiled);
-        Files.copy(compiled, output.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
 
         String loaderPath = loaderName + ".class";
         entries.put(loaderPath, loaderBytes(loaderName));
-        entries.put("j2rust/" + platform + "-" + extension, Files.readAllBytes(compiled));
-        Path result = output.resolve(input.getFileName());
+        Path result = output.resolve(outputJarName);
         if (input.toAbsolutePath().normalize().equals(result.toAbsolutePath().normalize()))
             throw new IOException("Input and output JAR paths must differ");
+        ConsoleUtil.phase("Packaging transformed JAR");
         try (ZipOutputStream jar = new ZipOutputStream(Files.newOutputStream(result))) {
             for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
                 if (signatureEntry(entry.getKey())) continue;
@@ -336,8 +350,7 @@ public final class RustBackend {
                 jar.closeEntry();
             }
         }
-        System.out.println("Rust methods: " + converted + ", kept as Java: " + skipped);
-        System.out.println("JAR: " + result + "; library: " + output.resolve(filename));
+        ConsoleUtil.summary(converted, skipped, result.toString(), output.resolve("native libraries").toString());
     }
 
     private byte[] loaderBytes(String name) throws IOException {

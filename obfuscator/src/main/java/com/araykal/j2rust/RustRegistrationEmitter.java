@@ -15,7 +15,7 @@ final class RustRegistrationEmitter {
         StringBuilder code = new StringBuilder(
                 "#[no_mangle]\npub unsafe extern \"system\" fn " +
                 RustMethodEmitter.symbol(loaderName, new MethodNode(Opcodes.ASM9, 0,
-                        "registerNativesForClass", "(Ljava/lang/String;Ljava/lang/Class;)V", null, null)) +
+                        "rustRegisterNatives", "(Ljava/lang/String;Ljava/lang/Class;)V", null, null)) +
                 "(env: *mut jni_sys::JNIEnv, _loader: jni_sys::jclass, " +
                 "name: jni_sys::jstring, clazz: jni_sys::jclass) {\n" +
                 "    let chars = (**env).GetStringUTFChars.unwrap()(env, name, std::ptr::null_mut());\n" +
@@ -27,8 +27,8 @@ final class RustRegistrationEmitter {
             code.append("            let methods = [\n");
             for (MethodRegistration method : entry.getValue()) {
                 code.append("                jni_sys::JNINativeMethod { name: b\"")
-                        .append(method.getName()).append("\\0\".as_ptr() as *mut i8, signature: b\"")
-                        .append(method.getDescriptor()).append("\\0\".as_ptr() as *mut i8, fnPtr: ")
+                        .append(method.getName()).append("\\0\".as_ptr() as *mut std::ffi::c_char, signature: b\"")
+                        .append(method.getDescriptor()).append("\\0\".as_ptr() as *mut std::ffi::c_char, fnPtr: ")
                         .append(method.getSymbol()).append(" as *mut c_void },\n");
             }
             code.append("            ];\n");

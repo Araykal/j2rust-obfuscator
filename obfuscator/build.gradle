@@ -73,6 +73,7 @@ dependencies {
     implementation 'org.ow2.asm:asm-commons:9.10.1'
 
     implementation 'info.picocli:picocli:4.6.3'
+    implementation 'org.tomlj:tomlj:2.2.0'
 
     compileOnly 'org.projectlombok:lombok:1.18.32'
     annotationProcessor 'org.projectlombok:lombok:1.18.32'

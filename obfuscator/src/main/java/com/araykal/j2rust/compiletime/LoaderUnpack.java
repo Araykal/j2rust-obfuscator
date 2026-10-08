@@ -31,17 +31,30 @@ public class LoaderUnpack {
         }
 
         String osTypeName;
+        String osToken;
         if (osName.contains("nix") || osName.contains("nux") || osName.contains("aix")) {
-            osTypeName = "linux.so";
+            osToken = "linux";
+            osTypeName = "so";
         } else if (osName.contains("win")) {
-            osTypeName = "windows.dll";
+            osToken = "windows";
+            osTypeName = "dll";
         } else if (osName.contains("mac")) {
-            osTypeName = "macos.dylib";
+            osToken = "macos";
+            osTypeName = "dylib";
         } else {
-            osTypeName = "raw" + osName;
+            osToken = "raw" + osName;
+            osTypeName = "bin";
         }
 
-        String libFileName = String.format("/%s/%s-%s", LoaderUnpack.class.getName().split("\\.")[0], platformTypeName, osTypeName);
+        String architectureFamily = platformTypeName.equals("x64") || platformTypeName.equals("x86") ? "x86" :
+                platformTypeName.startsWith("arm") ? "arm" : "raw";
+        String libraryName = String.format("rust-%s-%s_%s.%s", osToken, architectureFamily,
+                platformTypeName, osTypeName);
+
+        String className = LoaderUnpack.class.getName();
+        int packageEnd = className.lastIndexOf('.');
+        String packagePath = packageEnd < 0 ? "" : className.substring(0, packageEnd).replace('.', '/');
+        String libFileName = String.format("/%s/%s", packagePath, libraryName);
 
         File libFile;
         try {
@@ -91,8 +104,8 @@ public class LoaderUnpack {
     }
 
     public static void ensureLoaded(String name, Class<?> clazz) {
-        registerNativesForClass(name, clazz);
+        rustRegisterNatives(name, clazz);
     }
 
-    private static native void registerNativesForClass(String name, Class<?> clazz);
+    private static native void rustRegisterNatives(String name, Class<?> clazz);
 }

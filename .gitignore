@@ -93,6 +93,8 @@ modules.xml
 .gradle/
 /build/
 build/
+!obfuscator/src/main/java/com/araykal/j2rust/build/
+!obfuscator/src/main/java/com/araykal/j2rust/build/*.java
 # Ignore Gradle GUI config
 gradle-app.setting
 

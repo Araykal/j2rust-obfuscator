@@ -36,7 +36,72 @@ java -jar obfuscator/build/libs/obfuscator.jar input.jar output
 java -jar output/input.jar
 ```
 
-The output directory contains the transformed JAR, the compiled `.dll`, `.so`, or `.dylib`, generated Rust sources under `rust/`, and a machine-readable `coverage.json` report. Native code is embedded in the transformed JAR, so a separate `java.library.path` setting is not normally needed.
+### Config
+
+Use `--config` when input, output, selection, and strictness should be kept in a readable file:
+
+```sh
+java -jar obfuscator/build/libs/obfuscator.jar --config config.toml
+```
+
+```toml
+# J2Rust configuration 
+# Input JAR path, relative to this file.
+input = "test.jar"
+
+# Output transformed JAR path, relative to this file.
+output = "test/test-obf.jar"
+
+
+[selection]
+# Use @Native/@NotNative. This takes priority over include and exclude.
+annotations = false
+
+# Only convert matching classes or methods.
+# Examples:
+#   pack.Main       = all methods in one class
+#   pack.*          = all classes directly in pack (not subpackages)
+#   pack.**         = all classes in pack and its subpackages
+#   pack.Main.*     = all methods in pack.Main
+#   pack.Main#main  = one method
+#   pack.Main#add(II)I = one method with descriptor.
+include = []
+
+# Skip matching classes or methods when include is empty.
+# The same class, package, recursive-package, and method syntax as include is supported.
+exclude = ["pack.tests.*","pack.Main#main"]
+
+
+[options]
+# Fail when selected methods remain Java.
+strict = false
+
+# Disable ANSI terminal colors.
+no_color = false
+
+# Build in a temporary directory, keep only the configured output JAR, then delete generated files.
+clear = false
+
+
+[build]
+# Rust build tool: cargo or cargo-zigbuild.
+tool = "cargo-zigbuild"
+
+# Targets to compile when tool = cargo-zigbuild (cargo always uses host):
+#   host
+#   windows_x86_64
+#   windows_aarch64
+#   macos_x86_64
+#   macos_aarch64
+#   linux_x86_64
+#   linux_aarch64.
+# With cargo-zigbuild, Windows aliases use GNU/GNULVM targets.
+targets = ["windows_x86_64","windows_aarch64","linux_x86_64","linux_aarch64"]
+```
+
+Supported target names are lowercase: `host`, `windows_x86_64`, `windows_aarch64`, `macos_x86_64`, `macos_aarch64`, `linux_x86_64`, and `linux_aarch64`. When `tool = "cargo"`, the `targets` list is ignored and only `host` is compiled.
+
+For `cargo-zigbuild`, Windows targets use the GNU/GNULVM Rust targets automatically, avoiding MSVC linker flags. Missing Rust targets are installed with `rustup target add`; the regular `cargo` tool keeps the MSVC targets.
 
 Use `--strict` to fail when a selected method must remain Java. The coverage report is still written before that failure:
 
@@ -84,3 +149,4 @@ J2Rust is still under active development and is not yet a complete Java bytecode
 - [radioegor146/native-obfuscator](https://github.com/radioegor146/native-obfuscator)
 - [jni-rs/jni-rs](https://github.com/jni-rs/jni-rs)
 - [Megadash452/ez-jni-rs](https://github.com/Megadash452/ez-jni-rs)
+- [rust-cross/cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild)

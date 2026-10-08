@@ -13,6 +13,7 @@ final class StringIntrinsics {
         IntrinsicRegistry.register("java/lang/String", "charAt", "(I)C", StringIntrinsics::emitCharAt);
         IntrinsicRegistry.register("java/lang/String", "substring", "(I)Ljava/lang/String;", StringIntrinsics::emitSubstring);
         IntrinsicRegistry.register("java/lang/String", "substring", "(II)Ljava/lang/String;", StringIntrinsics::emitSubstring);
+        IntrinsicRegistry.register("java/lang/String", "equals", "(Ljava/lang/Object;)Z", StringIntrinsics::emitEquals);
     }
 
     private static void emitLength(StringBuilder code, MethodInsnNode node, String exceptionPath) {
@@ -48,6 +49,11 @@ final class StringIntrinsics {
         code.append("let result = unsafe { substring(_env, text, begin, end) }; ");
         code.append("if unsafe { has_exception(_env) } { ").append(exceptionPath).append(" } ");
         code.append("stack.push(Value::O(refs.track(result))); ");
+    }
+
+    private static void emitEquals(StringBuilder code, MethodInsnNode node, String exceptionPath) {
+        code.append("let other = stack.pop().unwrap().o(); let text = stack.pop().unwrap().o(); ");
+        code.append("stack.push(Value::I(unsafe { equals(_env, text, other) }));");
     }
 
     private static void nullCheck(StringBuilder code, String exceptionPath, String method) {

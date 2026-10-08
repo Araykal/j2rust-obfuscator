@@ -19,8 +19,8 @@ public final class CoverageReport {
         int kept = 0;
         int excluded = 0;
         for (Entry entry : entries) {
-            if (entry.status.equals("rust")) converted++;
-            else if (entry.status.equals("java")) kept++;
+            if (entry.status.startsWith("rust-")) converted++;
+            else if (entry.status.equals("java-retained")) kept++;
             else excluded++;
         }
         StringBuilder json = new StringBuilder("{\n  \"schemaVersion\": 1,\n  \"converted\": ")
